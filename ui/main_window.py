@@ -31,13 +31,11 @@ class MainWindow(ctk.CTk):
         self.refresh_goals_list()
     
     def refresh_goals_list(self):
-        # Очищаем list_frame
         for widget in self.list_frame.winfo_children():
             widget.destroy()
         
         goals = get_goals()
         
-        # Заголовок
         title = ctk.CTkLabel(self.list_frame, text="Мои цели", font=("Segoe UI", 20, "bold"))
         title.pack(pady=20)
         
@@ -48,14 +46,24 @@ class MainWindow(ctk.CTk):
             for g in goals:
                 self.create_goal_card(g)
         
-        # Кнопка "Новая цель"
+        # Кнопка новой цели
         add_btn = ctk.CTkButton(self.list_frame, text="＋ Новая цель", command=self.open_setup,
                                width=200, height=40, fg_color="#2e7d32", hover_color="#1b5e20")
-        add_btn.pack(pady=15)
+        add_btn.pack(pady=10)
         
-        # Показываем список (на случай, если было скрыто)
+        # --- Чекбокс автозагрузки ---
+        autostart_state = is_in_startup()
+        self.autostart_var = ctk.BooleanVar(value=autostart_state)
+        self.autostart_check = ctk.CTkCheckBox(
+            self.list_frame, 
+            text="Запускать при входе в Windows",
+            variable=self.autostart_var,
+            command=self.toggle_autostart
+        )
+        self.autostart_check.pack(pady=5)
+        
         self.list_frame.pack(fill="both", expand=True)
-        self.detail_frame.pack_forget()
+        self.detail_frame.pack_forget
     
     def create_goal_card(self, goal):
         card = ctk.CTkFrame(self.list_frame, corner_radius=10, border_width=1, border_color="#bdc3c7")
