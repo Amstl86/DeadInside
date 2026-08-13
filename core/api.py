@@ -1,11 +1,11 @@
 from fastapi import FastAPI, HTTPException
-from fastapi import Depends
 from pydantic import BaseModel
-from typing import List
+from typing import Any, List
 from .db import SessionLocal, init_db
 from .models import Item
 from . import sync
 import os
+
 try:
     import firebase_admin
     from firebase_admin import auth as firebase_auth
@@ -14,6 +14,23 @@ except Exception:
     firebase_admin_available = False
 
 app = FastAPI(title="DeadInside Core API")
+AUTH_MODE = os.environ.get("AUTH_MODE", "dev" if not firebase_admin_available else "firebase")
+
+
+def _dev_token_response(token: str | None = None, uid: str | None = None):
+    resolved_uid = uid or "dev-user"
+    return {
+        "uid": resolved_uid,
+        "claims": {"uid": resolved_uid, "auth_mode": "dev", "token": token or "dev-token"},
+    }
+
+
+def _verify_token_payload(payload: dict[str, Any] | None = None):
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        return payload.get("id_token") or payload.get("token")
+    return None
 
 
 class ItemIn(BaseModel):
@@ -61,7 +78,7 @@ def create_item(payload: ItemIn):
 def update_item(item_id: str, payload: ItemIn):
     db = SessionLocal()
     try:
-        it = db.query(Item).get(item_id)
+        it = db.get(Item, item_id)
         if not it:
             raise HTTPException(status_code=404, detail="Not found")
         it.title = payload.title
@@ -78,7 +95,7 @@ def update_item(item_id: str, payload: ItemIn):
 def delete_item(item_id: str):
     db = SessionLocal()
     try:
-        it = db.query(Item).get(item_id)
+        it = db.get(Item, item_id)
         if not it:
             raise HTTPException(status_code=404, detail="Not found")
         it.deleted = True
@@ -104,13 +121,34 @@ def sync_pull(user_id: str):
 
 
 @app.post("/api/v1/verify_token")
-def verify_token(id_token: str):
-    """Verify Firebase ID token and return uid if valid."""
-    if not firebase_admin_available:
-        raise HTTPException(status_code=500, detail="firebase_admin not installed/configured")
+def verify_token(payload: dict | None = None):
+    """Verify Firebase ID token and return uid if valid; fall back to dev auth when not configured."""
+    id_token = _verify_token_payload(payload)
+    if not id_token:
+        raise HTTPException(status_code=400, detail="id_token is required")
+
+    if AUTH_MODE == "dev" or not firebase_admin_available:
+        return _dev_token_response(token=id_token)
+
     try:
         decoded = firebase_auth.verify_id_token(id_token)
         return {"uid": decoded.get("uid"), "claims": decoded}
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@app.post("/api/v1/refresh_token")
+def refresh_token(payload: dict | None = None):
+    refresh_token_value = (payload or {}).get("refresh_token") if isinstance(payload, dict) else None
+    if not refresh_token_value:
+        raise HTTPException(status_code=400, detail="refresh_token is required")
+
+    if AUTH_MODE == "dev" or not firebase_admin_available:
+        return {"uid": "dev-user", "id_token": refresh_token_value, "refresh_token": refresh_token_value}
+
+    try:
+        decoded = firebase_auth.verify_id_token(refresh_token_value)
+        return {"uid": decoded.get("uid"), "id_token": refresh_token_value, "refresh_token": refresh_token_value}
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e))
 
@@ -131,7 +169,7 @@ def import_local(payload: dict):
     db = SessionLocal()
     try:
         for obj in items:
-            it = db.query(Item).get(obj.get("id"))
+            it = db.get(Item, obj.get("id"))
             if it is None:
                 it = Item(
                     id=obj.get("id"),

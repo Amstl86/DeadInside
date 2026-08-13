@@ -58,7 +58,7 @@ def pull_all(user_id: str, service_account_json: Optional[str] = None):
         for d in docs:
             data = d.to_dict() or {}
             remote_updated = _parse_iso(data.get("updated_at"))
-            local = db.query(Item).get(d.id)
+            local = db.get(Item, d.id)
             if local is None:
                 local = Item(
                     id=d.id,
@@ -98,7 +98,7 @@ def detect_conflicts(user_id: str, service_account_json: Optional[str] = None):
         for d in docs:
             data = d.to_dict() or {}
             remote_updated = _parse_iso(data.get("updated_at"))
-            local = db.query(Item).get(d.id)
+            local = db.get(Item, d.id)
             if local and remote_updated and local.updated_at and remote_updated > local.updated_at:
                 # remote newer than local (no conflict)
                 continue
