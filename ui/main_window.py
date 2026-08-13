@@ -71,7 +71,7 @@ class MainWindow(ctk.CTk):
         self.autostart_var = ctk.BooleanVar(value=autostart_state)
         self.autostart_check = ctk.CTkCheckBox(
             self.list_frame,
-            text="Запускать при входе в Windows",
+            text="Запускать при входе в систему",
             variable=self.autostart_var,
             command=self.toggle_autostart
         )
