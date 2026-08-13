@@ -7,11 +7,13 @@ DATA_DIR = os.path.join(os.getenv('APPDATA'), 'DeadInside')
 DATA_FILE = os.path.join(DATA_DIR, 'goal_data.json')
 MAX_GOALS = 5
 
+
 def ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+
 def load_data():
-    """Загружает данные. Мигрирует старый одиночный формат в новый массив целей."""
+    """Загружает данные. Мигрирует старый одиночный формат в новый массив."""
     ensure_data_dir()
     if not os.path.exists(DATA_FILE):
         return {"goals": []}
@@ -30,18 +32,22 @@ def load_data():
         save_data(data)
     return data
 
+
 def save_data(data):
     ensure_data_dir()
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
+
 def get_goals():
     """Возвращает список целей."""
     return load_data()["goals"]
 
+
 def can_add_goal():
     """Проверяет, не достигнут ли лимит целей."""
     return len(get_goals()) < MAX_GOALS
+
 
 def add_goal(goal_text, deadline_date: date):
     """Добавляет новую цель. Возвращает True при успехе, иначе False."""
@@ -59,11 +65,13 @@ def add_goal(goal_text, deadline_date: date):
     save_data(data)
     return True
 
+
 def delete_goal(goal_id):
     """Удаляет цель по ID."""
     data = load_data()
     data["goals"] = [g for g in data["goals"] if g["id"] != goal_id]
     save_data(data)
+
 
 def get_goal(goal_id):
     """Возвращает данные цели по ID или None."""
@@ -71,6 +79,7 @@ def get_goal(goal_id):
         if g["id"] == goal_id:
             return g
     return None
+
 
 def add_or_update_note(goal_id, note_text):
     """Добавляет/обновляет заметку за сегодня для указанной цели."""
@@ -87,6 +96,7 @@ def add_or_update_note(goal_id, note_text):
             save_data(data)
             return
 
+
 def get_today_note(goal_id):
     """Возвращает текст заметки за сегодня для цели (или '')."""
     goal = get_goal(goal_id)
@@ -98,6 +108,7 @@ def get_today_note(goal_id):
             return note["text"]
     return ""
 
+
 def get_days_remaining(goal_id):
     """Осталось дней до дедлайна цели (целое >=0)."""
     goal = get_goal(goal_id)
@@ -106,6 +117,7 @@ def get_days_remaining(goal_id):
     deadline = date.fromisoformat(goal["deadline"])
     delta = deadline - date.today()
     return max(delta.days, 0)
+
 
 def get_total_days(goal_id):
     """Общее количество дней от создания до дедлайна."""
