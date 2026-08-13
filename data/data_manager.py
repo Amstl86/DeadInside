@@ -17,8 +17,15 @@ def load_data():
     ensure_data_dir()
     if not os.path.exists(DATA_FILE):
         return {"goals": []}
-    with open(DATA_FILE, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    try:
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError, TypeError):
+        return {"goals": []}
+
+    if not isinstance(data, dict):
+        return {"goals": []}
+
     # Миграция старой структуры
     if "goal" in data and "deadline" in data:
         migrated_goal = {
@@ -30,6 +37,10 @@ def load_data():
         }
         data = {"goals": [migrated_goal]}
         save_data(data)
+
+    data.setdefault("goals", [])
+    if not isinstance(data["goals"], list):
+        data["goals"] = []
     return data
 
 
@@ -51,8 +62,22 @@ def can_add_goal():
 
 def add_goal(goal_text, deadline_date: date):
     """Добавляет новую цель. Возвращает True при успехе, иначе False."""
+    if goal_text is None:
+        return False
+
+    goal_text = goal_text.strip()
+    if not goal_text or len(goal_text) > 300:
+        return False
+
+    if not isinstance(deadline_date, date):
+        return False
+
+    if deadline_date <= date.today():
+        return False
+
     if not can_add_goal():
         return False
+
     data = load_data()
     new_goal = {
         "id": str(uuid.uuid4()),
@@ -83,16 +108,23 @@ def get_goal(goal_id):
 
 def add_or_update_note(goal_id, note_text):
     """Добавляет/обновляет заметку за сегодня для указанной цели."""
+    if note_text is None:
+        return
+
+    note_text = note_text.strip()
+    if not note_text:
+        return
+
     data = load_data()
     today_str = date.today().isoformat()
     for goal in data["goals"]:
         if goal["id"] == goal_id:
-            for note in goal["notes"]:
-                if note["date"] == today_str:
+            for note in goal.get("notes", []):
+                if note.get("date") == today_str:
                     note["text"] = note_text
                     save_data(data)
                     return
-            goal["notes"].append({"date": today_str, "text": note_text})
+            goal.setdefault("notes", []).append({"date": today_str, "text": note_text})
             save_data(data)
             return
 
