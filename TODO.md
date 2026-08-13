@@ -2,14 +2,14 @@
 
 Список задач: отмечено выполненное, остальное — в работе или ожидает реализации.
 
-- [ ] Define cross-platform architecture and tech choices (in-progress)
+- [x] Define cross-platform architecture and tech choices
 - [x] Design & implement core data layer (models + SQLite)
-- [x] Design sync protocol and choose backend (Google Drive API / Firebase)
-- [ ] Implement desktop UI for Linux (prototype) (in-progress)
-- [ ] Implement Android UI (prototype)
-- [ ] Implement auth (OAuth2) and token handling (in-progress)
-- [ ] Implement sync logic with conflict resolution (CRDT/last-writer) (in-progress)
-- [ ] Packaging, CI/CD and distribution (Linux packages, Android APK) (in-progress)
+- [x] Design sync protocol and choose backend (Firebase)
+- [x] Implement desktop UI prototype (Tkinter/CustomTkinter entrypoint)
+- [x] Implement Android UI prototype
+- [x] Implement auth (Firebase/dev fallback + ID/refresh token handling)
+- [ ] Implement sync logic with conflict resolution (CRDT/last-writer)
+- [x] Packaging, CI/CD and distribution (local PyInstaller validation + Linux workflow)
 - [ ] Tests, security review, and docs (in-progress)
 - [x] Architectural sketch: Flutter vs Python UI
 - [x] Component diagram + API endpoints for Flutter+Firebase
@@ -21,22 +21,30 @@
 - [x] Add GitHub Actions CI workflow
 
 ---
-Приоритеты (рекомендация):
+Приоритеты (актуальные):
 
-- Высокий: `Implement Android UI (prototype)`, `Implement desktop UI for Linux`.
-- Средний: `Implement auth (OAuth2) и token handling`, `Implement sync logic`.
-- Низкий: упаковка/дистрибуция и расширенные тесты/аудит.
-
-Если нужно, могу автоматически отмечать пункты как выполненные при изменениях в репо.
+- Высокий: синхронизация с конфликтами, продакшн-конфиг Firebase Auth, проверка артефакта GitHub Actions.
+- Средний: финальная security review, docs, подготовка release checklist.
+- Низкий: расширенные тесты, оптимизация и поддержка Android/desktop для продакшн-сборки.
 
 ---
-**Где мы остановились (на сегодня)**
+**Текущее состояние**
 
-- Добавлен workflow сборки Linux (`.github/workflows/build_linux.yml`), требуется его запуск в GitHub Actions чтобы получить исполняемый артефакт в `dist/`.
+- [x] Core API и DB проходят unit tests в проектном venv.
+- [x] Android prototype проходит `flutter analyze` и `flutter test`.
+- [x] Desktop-версия собирается через PyInstaller локально.
+- [ ] Требуется проверка GitHub Actions артефакта на Linux/WSL в реальном CI.
 
-**Следующие 3 шага (приоритетные)**
+**Следующие шаги**
 
-- [ ] Запустить CI workflow на GitHub и скачать/проверить артефакт `deadinside-linux` (проверить на Linux/WSL).
-- [ ] Реализовать аутентификацию (Firebase Auth / OAuth2) в `core` и добавить обработку ID/refresh токенов.
-- [ ] Начать прототип Android (Flutter): scaffold проекта, подключить `firebase_auth`, реализовать базовую синхронизацию с Firestore.
+- [ ] Запустить CI workflow на GitHub и проверить артефакт `deadinside-linux`.
+- [ ] Завершить продакшн-конфиг Firebase Auth и refresh-token flow.
+- [ ] Реализовать полноценную sync-логике с конфликтами и дедупликацией.
+- [ ] Провести security review, обновить docs и подготовить release checklist.
+
+**Ключевые заметки**
+
+- В локальном dev-режиме auth работает через безопасный fallback, чтобы тестировать API без Firebase credentials.
+- Android prototype уже готов как базовый scaffold для дальнейшей интеграции с Firebase и Firestore.
+- Desktop packaging проверен локально; маркетинговый и release этап зависит от GitHub Actions и финальной валидации на Linux.
 
