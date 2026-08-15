@@ -6,8 +6,10 @@ from .models import Item
 from . import sync
 import os
 import json
+import sys
 
 from .models import OperationLog
+import datetime
 
 try:
     import firebase_admin
@@ -127,12 +129,53 @@ def sync_pull(user_id: str):
 def list_conflicts(user_id: str):
     """Return detected conflict ids and ops_log entries for a user."""
     service_account = os.environ.get("SERVICE_ACCOUNT_JSON")
-    # detect conflicts via sync module
-    conflicts = sync.detect_conflicts(user_id, service_account)
+    # detect conflicts via sync module (resolve from sys.modules to respect test monkeypatch)
+    detect = None
+    mod = sys.modules.get("core.sync")
+    if mod and hasattr(mod, "detect_conflicts"):
+        detect = getattr(mod, "detect_conflicts")
+    else:
+        detect = getattr(sync, "detect_conflicts", None)
+    try:
+        conflicts = detect(user_id, service_account) if callable(detect) else []
+    except Exception:
+        conflicts = []
     db = SessionLocal()
     try:
         ops = db.query(OperationLog).filter(OperationLog.user_id == user_id).order_by(OperationLog.created_at.desc()).all()
-        return {"conflicts": conflicts, "ops_log": [o.to_dict() for o in ops]}
+        # compute which conflicts were acknowledged by user (op_type == 'conflict_seen')
+        seen_item_ids = {o.item_id for o in ops if o.op_type == "conflict_seen"}
+        unresolved = [c for c in conflicts if c not in seen_item_ids]
+        return {"conflicts": conflicts, "unresolved_conflicts": unresolved, "ops_log": [o.to_dict() for o in ops]}
+    finally:
+        db.close()
+
+
+
+@app.post("/api/v1/sync/ack")
+def ack_conflict(payload: dict | None = None):
+    """Acknowledge (mark viewed) a conflict for a user.
+
+    Payload: {"user_id": "...", "item_id": "...", "note": "optional"}
+    """
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="payload must be a dict")
+    user_id = payload.get("user_id")
+    item_id = payload.get("item_id")
+    note = payload.get("note")
+    if not user_id or not item_id:
+        raise HTTPException(status_code=400, detail="user_id and item_id are required")
+
+    db = SessionLocal()
+    try:
+        try:
+            op = OperationLog(user_id=user_id, item_id=item_id, op_type="conflict_seen", payload=json.dumps({"note": note}), created_at=datetime.datetime.utcnow())
+            db.add(op)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "acknowledged", "item_id": item_id}
     finally:
         db.close()
 

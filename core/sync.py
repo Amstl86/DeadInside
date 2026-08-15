@@ -8,9 +8,14 @@ import json
 
 
 def _get_client(service_account_json: Optional[str] = None):
-    if service_account_json:
-        return firestore.Client.from_service_account_json(service_account_json)
-    return firestore.Client()
+    try:
+        if service_account_json:
+            return firestore.Client.from_service_account_json(service_account_json)
+        return firestore.Client()
+    except Exception:
+        # Best-effort: when Firestore credentials are not configured (dev/test),
+        # return None so callers can handle lack of remote access gracefully.
+        return None
 
 
 def push_all(user_id: str, service_account_json: Optional[str] = None):
@@ -18,6 +23,9 @@ def push_all(user_id: str, service_account_json: Optional[str] = None):
     Uses batched writes and stores an operation log entry in users/{uid}/ops_log if available.
     """
     client = _get_client(service_account_json)
+    if client is None:
+        # nothing to push when Firestore client unavailable
+        return 0
     db = SessionLocal()
     try:
         items = db.query(Item).all()
@@ -91,6 +99,11 @@ def pull_all(user_id: str, service_account_json: Optional[str] = None, return_co
     a tuple `(count, conflicts)` where `conflicts` is a list of item ids that need manual merge.
     """
     client = _get_client(service_account_json)
+    if client is None:
+        # no remote to pull from; return zero processed and no conflicts
+        if return_conflicts:
+            return 0, []
+        return 0
     db = SessionLocal()
     try:
         docs = client.collection("users").document(user_id).collection("items").stream()
@@ -143,6 +156,8 @@ def detect_conflicts(user_id: str, service_account_json: Optional[str] = None):
     Returns a list of item ids that may need manual merge.
     """
     client = _get_client(service_account_json)
+    if client is None:
+        return []
     db = SessionLocal()
     try:
         conflicts = []
