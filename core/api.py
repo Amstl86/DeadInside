@@ -5,6 +5,9 @@ from .db import SessionLocal, init_db
 from .models import Item
 from . import sync
 import os
+import json
+
+from .models import OperationLog
 
 try:
     import firebase_admin
@@ -118,6 +121,72 @@ def sync_pull(user_id: str):
     service_account = os.environ.get("SERVICE_ACCOUNT_JSON")
     count = sync.pull_all(user_id, service_account)
     return {"status": "pulled", "count": count}
+
+
+@app.get("/api/v1/sync/conflicts")
+def list_conflicts(user_id: str):
+    """Return detected conflict ids and ops_log entries for a user."""
+    service_account = os.environ.get("SERVICE_ACCOUNT_JSON")
+    # detect conflicts via sync module
+    conflicts = sync.detect_conflicts(user_id, service_account)
+    db = SessionLocal()
+    try:
+        ops = db.query(OperationLog).filter(OperationLog.user_id == user_id).order_by(OperationLog.created_at.desc()).all()
+        return {"conflicts": conflicts, "ops_log": [o.to_dict() for o in ops]}
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/sync/resolve")
+def resolve_conflict(payload: dict | None = None):
+    """Resolve a conflict by applying provided item data to local DB and recording an ops_log entry.
+
+    Expected payload: {"user_id": "...", "item": { ...item fields... }, "note": "optional"}
+    """
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="payload must be a dict")
+    user_id = payload.get("user_id")
+    item_obj = payload.get("item")
+    note = payload.get("note")
+    if not user_id or not item_obj or not isinstance(item_obj, dict):
+        raise HTTPException(status_code=400, detail="user_id and item are required")
+
+    db = SessionLocal()
+    try:
+        item_id = item_obj.get("id")
+        if not item_id:
+            raise HTTPException(status_code=400, detail="item.id is required")
+        it = db.get(Item, item_id)
+        # apply (upsert)
+        if it is None:
+            it = Item(
+                id=item_id,
+                title=item_obj.get("title") or "",
+                content=item_obj.get("content"),
+                created_at=item_obj.get("created_at"),
+                updated_at=item_obj.get("updated_at"),
+                version=item_obj.get("version", 1),
+                deleted=item_obj.get("deleted", False),
+            )
+            db.add(it)
+        else:
+            it.title = item_obj.get("title") or it.title
+            it.content = item_obj.get("content")
+            it.updated_at = item_obj.get("updated_at") or it.updated_at
+            it.version = item_obj.get("version", it.version)
+            it.deleted = item_obj.get("deleted", it.deleted)
+
+        # record resolution in ops_log
+        try:
+            op = OperationLog(user_id=user_id, item_id=item_id, op_type="conflict_resolved", payload=json.dumps({"item": item_obj, "note": note}), created_at=datetime.datetime.utcnow())
+            db.add(op)
+        except Exception:
+            pass
+
+        db.commit()
+        return {"status": "resolved", "item_id": item_id}
+    finally:
+        db.close()
 
 
 @app.post("/api/v1/verify_token")

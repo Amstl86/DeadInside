@@ -24,3 +24,23 @@ class Item(Base):
             "version": self.version,
             "deleted": self.deleted,
         }
+
+
+class OperationLog(Base):
+    __tablename__ = "ops_log"
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(64), nullable=True, index=True)
+    item_id = Column(String(36), nullable=True, index=True)
+    op_type = Column(String(64), nullable=False)
+    payload = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "item_id": self.item_id,
+            "op_type": self.op_type,
+            "payload": self.payload,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

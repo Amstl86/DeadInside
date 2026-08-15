@@ -1,9 +1,10 @@
 import os
 import datetime
-from typing import Optional
+from typing import Optional, Tuple, List
 from google.cloud import firestore
 from .db import SessionLocal
-from .models import Item
+from .models import Item, OperationLog
+import json
 
 
 def _get_client(service_account_json: Optional[str] = None):
@@ -45,21 +46,62 @@ def _parse_iso(s: Optional[str]):
         return None
 
 
-def pull_all(user_id: str, service_account_json: Optional[str] = None):
-    """Pull all items from Firestore and merge into local DB (last-writer-by-updated_at).
+def _decide_merge(local: Optional[Item], data: dict) -> Tuple[bool, bool]:
+    """Decide whether to apply remote data over local.
 
-    This is a conservative merge: remote wins when remote.updated_at is newer than local.updated_at.
+    Returns (apply_remote, conflict_detected).
+    Strategy:
+    - Prefer higher `version`.
+    - If versions equal, use `updated_at` timestamp as tie-breaker.
+    - If timestamps are very close (<5s) and content differs, mark as conflict.
+    """
+    remote_version = data.get("version") or 0
+    remote_updated = _parse_iso(data.get("updated_at"))
+    if local is None:
+        return True, False
+
+    local_version = local.version or 0
+    if remote_version > local_version:
+        return True, False
+    if remote_version < local_version:
+        return False, False
+
+    # versions equal -> compare timestamps
+    if remote_updated and local.updated_at:
+        delta = (remote_updated - local.updated_at).total_seconds()
+        # content difference heuristic
+        remote_title = data.get("title") or ""
+        remote_content = data.get("content")
+        local_title = local.title or ""
+        local_content = local.content
+        if abs(delta) < 5 and (remote_title != local_title or remote_content != local_content):
+            return False, True
+        return remote_updated > local.updated_at, False
+
+    if remote_updated and not local.updated_at:
+        return True, False
+
+    return False, False
+
+
+def pull_all(user_id: str, service_account_json: Optional[str] = None, return_conflicts: bool = False):
+    """Pull all items from Firestore and merge into local DB.
+
+    By default returns count of processed remote docs. If `return_conflicts=True`, returns
+    a tuple `(count, conflicts)` where `conflicts` is a list of item ids that need manual merge.
     """
     client = _get_client(service_account_json)
     db = SessionLocal()
     try:
         docs = client.collection("users").document(user_id).collection("items").stream()
         count = 0
+        conflicts: List[str] = []
         for d in docs:
             data = d.to_dict() or {}
-            remote_updated = _parse_iso(data.get("updated_at"))
+            apply_remote, conflict = _decide_merge(db.get(Item, d.id), data)
             local = db.get(Item, d.id)
-            if local is None:
+            remote_updated = _parse_iso(data.get("updated_at"))
+            if local is None and apply_remote:
                 local = Item(
                     id=d.id,
                     title=data.get("title") or "",
@@ -70,24 +112,34 @@ def pull_all(user_id: str, service_account_json: Optional[str] = None):
                     deleted=data.get("deleted", False),
                 )
                 db.add(local)
-            else:
-                # last-writer-by-updated_at
-                if remote_updated and (not local.updated_at or remote_updated > local.updated_at):
-                    local.title = data.get("title") or local.title
-                    local.content = data.get("content")
-                    local.updated_at = remote_updated
-                    local.version = data.get("version", local.version)
-                    local.deleted = data.get("deleted", local.deleted)
+            elif local is not None and apply_remote:
+                local.title = data.get("title") or local.title
+                local.content = data.get("content")
+                local.updated_at = remote_updated or local.updated_at
+                local.version = data.get("version", local.version)
+                local.deleted = data.get("deleted", local.deleted)
+            elif conflict:
+                conflicts.append(d.id)
+                # log conflict into ops_log for later review
+                try:
+                    op = OperationLog(user_id=user_id, item_id=d.id, op_type="conflict_detected", payload=json.dumps(data), created_at=datetime.datetime.utcnow())
+                    db.add(op)
+                except Exception:
+                    # best-effort logging; don't fail the whole sync for logging issues
+                    pass
             count += 1
         db.commit()
+        if return_conflicts:
+            return count, conflicts
         return count
     finally:
         db.close()
 
 
 def detect_conflicts(user_id: str, service_account_json: Optional[str] = None):
-    """Detect items where both local and remote have updates after a given timestamp.
+    """Detect potential conflicts between local and remote items.
 
+    Uses the same heuristic as `_decide_merge` to identify items that require manual review.
     Returns a list of item ids that may need manual merge.
     """
     client = _get_client(service_account_json)
@@ -97,20 +149,9 @@ def detect_conflicts(user_id: str, service_account_json: Optional[str] = None):
         docs = client.collection("users").document(user_id).collection("items").stream()
         for d in docs:
             data = d.to_dict() or {}
-            remote_updated = _parse_iso(data.get("updated_at"))
-            local = db.get(Item, d.id)
-            if local and remote_updated and local.updated_at and remote_updated > local.updated_at:
-                # remote newer than local (no conflict)
-                continue
-            if local and remote_updated and local.updated_at and local.updated_at > remote_updated:
-                # local newer than remote (no conflict)
-                continue
-            # if both have updates but timestamps are close, flag for manual review
-            # simple heuristic: if both updated_at exist and differ by less than 5 seconds
-            if local and remote_updated and local.updated_at:
-                delta = abs((local.updated_at - remote_updated).total_seconds())
-                if delta < 5:
-                    conflicts.append(d.id)
+            apply_remote, conflict = _decide_merge(db.get(Item, d.id), data)
+            if conflict:
+                conflicts.append(d.id)
         return conflicts
     finally:
         db.close()
